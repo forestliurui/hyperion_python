@@ -1,0 +1,46 @@
+
+# A key uniquely describing the
+# experiments (determines results
+# folder used by server)
+experiment_name: mi_kernels
+
+# A key uniquely describing each experiment
+experiment_key:
+    - dataset
+experiment_key_format:
+    - '%s'
+
+# The key that uniquely describes
+# parameter settings (other parameters
+# are searched)
+parameter_key:
+  - classifier
+  - kernel
+  - base_kernel
+  - normalization
+parameter_key_format:
+  - '%s'
+  - '%s'
+  - '%s'
+  - '%s'
+
+# The default [inner, outer] folds to use
+# (can also be specified per experiment)
+#folds: [10, 5]
+folds: [2, 2]
+
+# A list of parameter settings
+# (can also be specified per experiment)
+parameters:
+  - classifier: svm
+    kernel: rbf
+    base_kernel: rbf
+    normalization: none
+    C: ['e-3', 'e5']
+    gamma: ['e-6', 'e1']
+    search:
+        type: random
+        n: 10
+
+experiments:
+    - dataset: natural_scene
