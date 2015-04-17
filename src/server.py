@@ -617,7 +617,8 @@ def load_config(configuration_file, results_root_dir):
                                 fold_config, param_config,
                                 resampling_constructor)
         settings = experiment_config.get_settings()
-        prog = ProgressMonitor(total=len(settings), print_interval=10,
+        #import pdb;pdb.set_trace()
+	prog = ProgressMonitor(total=len(settings), print_interval=10,
                                msg='\tGetting tasks')
         for setting in settings:
             key = experiment_config.get_key(**setting)

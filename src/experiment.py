@@ -204,6 +204,7 @@ def client_target(task, callback):
 	    for ii in range(5):
 		AUC_list.append(score(test.instance_labels[:,ii], bag_predictions[:,ii]))
 	    AUC_mean=np.mean(AUC_list)
+	    submission['statistics'][scorename]=AUC_mean
 	    print ('Test Bag Average %s Score: %f'
                    % (scorename,AUC_mean ))
 	    print( 'Test Bag Individual %s Score: ' %scorename   +','.join(map(str, AUC_list))   )
