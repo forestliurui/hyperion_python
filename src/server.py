@@ -13,6 +13,9 @@ from threading import RLock
 from collections import defaultdict
 from random import shuffle
 import numpy as np
+import threading
+import Queue
+import sqlite3
 
 from folds import FoldConfiguration
 from progress import ProgressMonitor
@@ -91,15 +94,16 @@ def plaintext(f):
 
 class ExperimentServer(object):
 
-    def __init__(self, tasks, params, render,
+    def __init__(self, tasks, params, render, shared_variables, 
                  task_expire=DEFAULT_TASK_EXPIRE):
         self.status_lock = RLock()
         self.tasks = tasks
         self.params = params
         self.render = render
+        self.shared_variables=shared_variables
         self.task_expire = task_expire
-
-        self.unfinished = set(self.tasks.items())
+        #import pdb;pdb.set_trace()
+        self.unfinished = set(self.shared_variables['to_be_run'].get().items())
 
     def clean(self):
         with self.status_lock:
@@ -119,10 +123,15 @@ class ExperimentServer(object):
     @plaintext
     @expose
     def request(self):
+        #import pdb;pdb.set_trace()
         with self.status_lock:
-            self.clean()
+            
             # Select a job to perform
-            unfinished = list(self.unfinished)
+            #import pdb;pdb.set_trace()
+            if(not self.shared_variables['to_be_run'].empty()):            
+		self.unfinished=set(self.unfinished).union(set(self.shared_variables['to_be_run'].get().items())) #read the new tasks from queue
+            self.clean()
+	    unfinished = list(self.unfinished)
             shuffle(unfinished)
             candidates = sorted(unfinished, key=lambda x: x[1].priority())
             if len(candidates) == 0:
@@ -194,6 +203,7 @@ class ExperimentServer(object):
     @plaintext
     @expose
     def submit(self, key_yaml=None, sub_yaml=None):
+        #import pdb;pdb.set_trace()
         try:
             key = yaml.load(key_yaml, Loader=Loader)
             submission = yaml.load(sub_yaml, Loader=Loader)
@@ -206,7 +216,12 @@ class ExperimentServer(object):
             if not task.finished:
                 task.store_results(submission)
                 task.finish()
+        self.shared_variables['condition_lock'].acquire()
+        #self.shared_variables['finished_set'].update({key:task})
+        self.shared_variables['condition_lock'].notifyAll()
+        self.shared_variables['condition_lock'].release()
         return "OK"
+
 
 def time_remaining_estimate(tasks, alpha=0.1):
     to_go = float(len([task for task in tasks if not task.finished]))
@@ -545,11 +560,83 @@ class ExperimentConfiguration(object):
 
 def start_experiment(configuration_file, results_root_dir):
     task_dict, param_dict = load_config(configuration_file, results_root_dir)
+    shared_variables={}  
+    queue_tasks_to_be_run=Queue.Queue()
+    #queue_tasks_finished=Queue.Queue() 
+    shared_variables['to_be_run']=queue_tasks_to_be_run  #the queue containing the tasks to be run
+    shared_variables['to_be_run'].put(dict())
+    shared_variables['finished_set']={}    #the dictionary containing the finished tasks by client 
+    #queues['finished']=queue_tasks_finished
+    shared_variables['condition_lock']=threading.Condition() #condition variable used to synchronize server and controller
 
-    server = ExperimentServer(task_dict, param_dict, render)
+
+    server = ExperimentServer(task_dict, param_dict, render, shared_variables)
     cherrypy.config.update({'server.socket_port': PORT,
                             'server.socket_host': '0.0.0.0'})
-    cherrypy.quickstart(server)
+    
+    #def wrapper_server(task, args):
+    #     cherrp
+
+    thread_server=threading.Thread(target=cherrypy.quickstart, args=(server,))
+    thread_server.start()    
+    #cherrypy.quickstart(server)
+    #server_controller(tasks, queues)
+    run_tune_parameter('natural_scene.fold_0000_of_0002.train','natural_scene.fold_0000_of_0002.test', task_dict, shared_variables)
+    run_tune_parameter('natural_scene.fold_0001_of_0002.train','natural_scene.fold_0001_of_0002.test', task_dict, shared_variables)
+
+def server_controller(tasks, queues):
+    queue_tasks_to_be_run=queues['to_be_run']
+    queue_tasks_finished=queues['finished']
+
+def run_tune_parameter(train, test, tasks, shared_variables):
+    #train is the string for training dataset
+    #test is the string for testing dataset
+    #tasks is the all possible tasks in dictionary format, i.e. task_dict
+    #shared_variables contains two conponents: one is the queue to be run, the second one is condition_lock that synchronize
+
+    #this function will return the optimal task on the training set/testing set pair
+    
+    #import pdb; pdb.set_trace()
+    #run the experiment train with the best parameter tuned on train
+    subtasks=dict((k, tasks[k] ) for k in tasks.keys()  if k[2].find(train+'.')==0    ) #subtasks is the dictionary which contains the tasks to tune the parameters for train
+    shared_variables['condition_lock'].acquire()
+    shared_variables['to_be_run'].put(subtasks)
+    #import pdb; pdb.set_trace()
+    while(not reduce(lambda x, y: x and y, [ tasks[z].finished for z in subtasks.keys()   ]   )):  #if all tasks are finished
+    	print 'blocked by wait'
+       	shared_variables['condition_lock'].wait()
+	print 'awakened from wait'
+    
+    shared_variables['condition_lock'].release()  
+    print 'all subtasks are finished'
+    
+    num_para_combination=max([ subtasks.keys()[x][5] for x in range(len(subtasks) )  ])+1
+    statistic_avg_per_para={}
+
+    for para_index in range(num_para_combination):
+ 	statistic_avg_per_para[para_index]=np.mean( [tasks[x].get_statistic('AUC')[0] for x in subtasks.keys() if x[5]==para_index] ) 
+    
+    para_index_optimal = np.argmax(statistic_avg_per_para.values())
+    subtasks=dict((k, tasks[k] ) for k in tasks.keys()  if k[2]== train and k[5] == para_index_optimal    )
+    shared_variables['condition_lock'].acquire()    
+    shared_variables['to_be_run'].put(subtasks)
+    
+    while(not reduce(lambda x, y: x and y, [ tasks[z].finished for z in subtasks.keys()   ]   )):  #if all tasks are finished
+    	print 'blocked by wait'
+       	shared_variables['condition_lock'].wait()
+	print 'awakened from wait'
+    
+    shared_variables['condition_lock'].release()  
+    print 'all subtasks are finished'
+    
+    print 'parameter tuning on training set'+train+' is finished'
+    
+    return subtasks.keys()[0]  #return the key of the optimal task for training set "train"
+    #import pdb; pdb.set_trace()  
+    
+    
+
+
 
 def load_config(configuration_file, results_root_dir):
     tasks = {}

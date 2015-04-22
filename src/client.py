@@ -106,7 +106,8 @@ def client_loop(target, host, port=PORT, blacklist=None):
                         break
 
         if not callback.quit:
-            target_thread = Thread(target=wrapper, args=(task, callback))
+            #import pdb; pdb.set_trace()
+	    target_thread = Thread(target=wrapper, args=(task, callback))
             target_thread.daemon = True
             print 'Starting task...'
             target_thread.start()
