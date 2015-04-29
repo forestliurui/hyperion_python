@@ -21,7 +21,7 @@ class SVM(object):
         kernel_name = parameters.pop('kernel')
         self.kernel = kernel.by_name(kernel_name, **parameters)
 
-    def fit(self, X, y):
+    def fit(self, X, y, weights=None):
         X = np.asarray(X)
         self.fit_data = X
         #  X is a list of arrays so applying asarray function to everything in that list
@@ -29,7 +29,7 @@ class SVM(object):
         #  but it converts a list of lists to a numpy array.
         #import pdb; pdb.set_trace()
 	self.gram_matrix = self.kernel(X, X)
-        self.estimator.fit(self.gram_matrix, y)
+        self.estimator.fit(self.gram_matrix, y, sample_weight = weights)
         return self
 
     def predict(self, X=None):

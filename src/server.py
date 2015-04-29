@@ -7,21 +7,25 @@ except ImportError:
     from yaml import Loader, Dumper
 import time
 import random
+import data
 import cherrypy
 from cherrypy import expose, HTTPError
 from threading import RLock
 from collections import defaultdict
 from random import shuffle
 import numpy as np
+from math import log, exp
+import editdistance
 import threading
 import Queue
 import sqlite3
 
+import evaluation_metric
 from folds import FoldConfiguration
 from progress import ProgressMonitor
 from results import get_result_manager
 
-PORT = 2114
+PORT = 2113
 DEFAULT_TASK_EXPIRE = 120 # Seconds
 TEMPLATE = """
 <html>
@@ -143,7 +147,7 @@ class ExperimentServer(object):
          train, test, parameter_id, parameter_set) = key
         parameters = self.params[experiment_id].get_parameters(
             parameter_id=parameter_id, parameter_set=parameter_set)
-        arguments = {'key': key, 'parameters': parameters}
+        arguments = {'key': key, 'parameters': parameters, 'instance_weights':self.shared_variables['instance_weights']}
         return yaml.dump(arguments, Dumper=Dumper)
 
     @plaintext
@@ -456,7 +460,8 @@ class Task(object):
     def get_predictions(self, bag_or_inst, train_or_test):
         if not self.grounded:
             raise Exception('Task not grounded!')
-
+        #import pdb;pdb.set_trace()
+        print 'try to get predictions'
         if not self.finished:
             raise UnfinishedException()
 
@@ -479,6 +484,39 @@ class Task(object):
         else:
             raise ValueError('"%s" neither "bag" nor "instance"'
                              % bag_or_inst)
+    def get_prediction_true_matrix(self, bag_or_inst, train_or_test ):
+	if not self.grounded:
+            raise Exception('Task not grounded!')
+        #import pdb;pdb.set_trace()
+        print 'try to get predictions'
+        if not self.finished:
+            raise UnfinishedException()
+
+        if train_or_test == 'train':
+            test_set_labels = False
+        elif train_or_test == 'test':
+            test_set_labels = True
+        else:
+            raise ValueError('"%s" neither "train" nor "test"' %
+                             train_or_test)
+    
+   	if bag_or_inst.startswith('b'):
+                
+   		prediction_inst=self.get_predictions(bag_or_inst, train_or_test) #this is dictionary, with key as inst_id and value as list of scores for each label
+        	if train_or_test == 'train':
+			data_test_train=data.get_dataset(self.train)
+		else:
+			data_test_train=data.get_dataset(self.test)
+
+                #test.instance_ids
+        	prediction_matrix=reduce( lambda x, y :np.vstack((x, y)), [prediction_inst[x[1]]  for x in data_test_train.instance_ids   ]  )
+        	label_matrix=data_test_train.instance_labels
+	elif bag_or_inst.startswith('i'):
+		raise ValueError('get_prediction_true_matrix for instance not implemented')
+	else:
+            raise ValueError('"%s" neither "bag" nor "instance"'
+                             % bag_or_inst)
+	return prediction_matrix, label_matrix
 
     def get_statistic(self, statistic_name):
         if not self.finished:
@@ -494,6 +532,22 @@ class Task(object):
 
         self.results_manager.store_results(submission,
             self.train, self.test, self.parameter_id_str, self.parameter_set)
+
+    def store_boosting_results(self, prediction_matrix_test_accumulated):
+        #this is used to store the prediction results for test dataset's each label from boosting
+        #bag_predictions = np.hstack((bag_predictions0[:,np.newaxis], bag_predictions1[:,np.newaxis],bag_predictions2[:,np.newaxis],bag_predictions3[:,np.newaxis],bag_predictions4[:,np.newaxis]  ))
+        data_test=data.get_dataset(self.test)
+	submission_boosting={}
+        submission_boosting['bag_predictions']={}
+        submission_boosting['bag_predictions']['test']={}
+        for ( _,i), y in zip(data_test.instance_ids, map(tuple,prediction_matrix_test_accumulated)):
+        	submission_boosting['bag_predictions']['test'][i] = map(float,y)
+        
+	
+	
+	self.store_results(submission_boosting)
+
+
 
     def ping(self):
         if not self.finished:
@@ -568,7 +622,7 @@ def start_experiment(configuration_file, results_root_dir):
     shared_variables['finished_set']={}    #the dictionary containing the finished tasks by client 
     #queues['finished']=queue_tasks_finished
     shared_variables['condition_lock']=threading.Condition() #condition variable used to synchronize server and controller
-
+    shared_variables['instance_weights']=[]
 
     server = ExperimentServer(task_dict, param_dict, render, shared_variables)
     cherrypy.config.update({'server.socket_port': PORT,
@@ -580,15 +634,69 @@ def start_experiment(configuration_file, results_root_dir):
     thread_server=threading.Thread(target=cherrypy.quickstart, args=(server,))
     thread_server.start()    
     #cherrypy.quickstart(server)
-    #server_controller(tasks, queues)
-    run_tune_parameter('natural_scene.fold_0000_of_0002.train','natural_scene.fold_0000_of_0002.test', task_dict, shared_variables)
-    run_tune_parameter('natural_scene.fold_0001_of_0002.train','natural_scene.fold_0001_of_0002.test', task_dict, shared_variables)
+    server_experiment(task_dict, shared_variables, server)
+    
 
-def server_controller(tasks, queues):
-    queue_tasks_to_be_run=queues['to_be_run']
-    queue_tasks_finished=queues['finished']
+def server_experiment(task_dict, shared_variables, server):
 
-def run_tune_parameter(train, test, tasks, shared_variables):
+    train_dataset_name_to_be_tuned='natural_scene.fold_0000_of_0002.train'
+    test_dataset_name_to_be_tuned='natural_scene.fold_0000_of_0002.test'
+    train_dataset_to_be_tuned=data.get_dataset(train_dataset_name_to_be_tuned)
+    #import pdb; pdb.set_trace()
+    iteration_max=2
+    epsilon={}
+    alpha={}
+    
+        
+    shared_variables['instance_weights']=dict.fromkeys(train_dataset_to_be_tuned.instance_ids,1)
+    
+    #shared_variables['instance_weights']=[1,1,1,1]
+    
+    for iteration in range(1, iteration_max+1):
+        print 'Boosting iteration NO. %d' % iteration
+    	task1=run_tune_parameter(train_dataset_name_to_be_tuned,test_dataset_name_to_be_tuned, task_dict , shared_variables, server)
+
+    	prediction_matrix, label_matrix =task_dict[task1].get_prediction_true_matrix('bag', 'train')
+    	prediction_matrix_bool=(prediction_matrix > 0)
+    	
+    	error_per_instance=[ editdistance.eval(prediction_matrix_bool[i,:], label_matrix[i,:])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
+    	weight_per_instance=[ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
+    	epsilon[iteration]=np.average( error_per_instance, weights= weight_per_instance   )
+        alpha[iteration]=log(( 1-epsilon[iteration])/float(epsilon[iteration]))
+        #import pdb; pdb.set_trace()
+
+        prediction_matrix_test, label_matrix_test =task_dict[task1].get_prediction_true_matrix('bag', 'test')
+        if iteration == 1:
+        	prediction_matrix_test_accumulated=prediction_matrix_test*alpha[iteration]
+	else:
+ 		prediction_matrix_test_accumulated=prediction_matrix_test_accumulated+prediction_matrix_test*alpha[iteration]
+        #update weights
+        for error_per_instance_index in range(len(error_per_instance)):
+                weight_key=train_dataset_to_be_tuned.instance_ids[error_per_instance_index]
+		shared_variables['instance_weights'][weight_key]=shared_variables['instance_weights'][weight_key]*exp(alpha[iteration]*error_per_instance[error_per_instance_index])
+
+    
+    import pdb; pdb.set_trace() #the end of boosting for one training dataset
+    task_dict[task1].store_boosting_results(prediction_matrix_test_accumulated)
+    eval_task1=evaluation_metric.EvaluationMetric(task_dict[task1])
+    eval_task1.avg_prec()
+    coverage_task1=evaluation_metric.coverage(task_dict[task1])
+
+    shared_variables['instance_weights']=[2,2,2,2]
+    task2=run_tune_parameter('natural_scene.fold_0000_of_0002.train','natural_scene.fold_0000_of_0002.test', task_dict , shared_variables, server)
+
+    shared_variables['instance_weights']=[2,2,2,2]
+    task2=run_tune_parameter('natural_scene.fold_0001_of_0002.train','natural_scene.fold_0001_of_0002.test', task_dict , shared_variables, server)
+
+    #rettast=task_dict[task1].get_predictions('bag','test')
+    
+    
+    import pdb; pdb.set_trace()
+    coverage_task1=evaluation_metric.coverage(task_dict[task1])
+    coverage_task2=evaluation_metric.coverage(task_dict[task2])
+    import pdb; pdb.set_trace()
+
+def run_tune_parameter(train, test , tasks, shared_variables, server):
     #train is the string for training dataset
     #test is the string for testing dataset
     #tasks is the all possible tasks in dictionary format, i.e. task_dict
@@ -599,8 +707,12 @@ def run_tune_parameter(train, test, tasks, shared_variables):
     #import pdb; pdb.set_trace()
     #run the experiment train with the best parameter tuned on train
     subtasks=dict((k, tasks[k] ) for k in tasks.keys()  if k[2].find(train+'.')==0    ) #subtasks is the dictionary which contains the tasks to tune the parameters for train
-    shared_variables['condition_lock'].acquire()
+    with server.status_lock:
+    	for sub_key in subtasks.keys():
+		subtasks[sub_key].finished = False
     shared_variables['to_be_run'].put(subtasks)
+    shared_variables['condition_lock'].acquire()
+    
     #import pdb; pdb.set_trace()
     while(not reduce(lambda x, y: x and y, [ tasks[z].finished for z in subtasks.keys()   ]   )):  #if all tasks are finished
     	print 'blocked by wait'
@@ -618,9 +730,12 @@ def run_tune_parameter(train, test, tasks, shared_variables):
     
     para_index_optimal = np.argmax(statistic_avg_per_para.values())
     subtasks=dict((k, tasks[k] ) for k in tasks.keys()  if k[2]== train and k[5] == para_index_optimal    )
-    shared_variables['condition_lock'].acquire()    
-    shared_variables['to_be_run'].put(subtasks)
     
+    with server.status_lock:
+     	for sub_key in subtasks.keys():
+		subtasks[sub_key].finished = False    
+    shared_variables['to_be_run'].put(subtasks)
+    shared_variables['condition_lock'].acquire()
     while(not reduce(lambda x, y: x and y, [ tasks[z].finished for z in subtasks.keys()   ]   )):  #if all tasks are finished
     	print 'blocked by wait'
        	shared_variables['condition_lock'].wait()

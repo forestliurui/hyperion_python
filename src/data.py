@@ -45,7 +45,7 @@ class MIDataset(object):
 
     def __init__(self, ids, X, y, regression):
         self.regression = regression
-        self.instance_ids = ids
+        self.instance_ids = ids  #this is a tuple list, i.e. each element in instance_ids is (bag_id, instance_id)
         self.instances = X
         self.instances_as_bags = [xx.reshape((1, -1)) for xx in X]
         self.instance_labels = y

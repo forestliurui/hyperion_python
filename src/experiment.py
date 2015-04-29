@@ -54,17 +54,29 @@ def client_target(task, callback):
     (experiment_name, experiment_id,
      train_dataset, test_dataset, _, _) = task['key']
     parameters = task['parameters']
-
+    instance_weights_dict=task['instance_weights']
     print 'Starting task %s...' % str(experiment_id)
     print 'Training Set: %s' % train_dataset
     print 'Test Set:     %s' % test_dataset
     print 'Parameters:'
     for k, v in parameters.items():
         print '\t%s: %s' % (k, str(v))
+    print 'instance weights: %s' % instance_weights_dict.values()[:10]
     #import pdb;pdb.set_trace()
    
     train = get_dataset(train_dataset)
     test = get_dataset(test_dataset)
+
+    instance_weights_list = [instance_weights_dict[weight_key] for weight_key in train.instance_ids  ]
+    instance_weights = np.array( instance_weights_list )  #instance_weights should be of type array in order to be used by sklearn module
+    
+    if instance_weights_dict.has_key(test.instance_ids[0]):
+      	instance_weights_test_list = [instance_weights_dict[weight_key] for weight_key in test.instance_ids  ]
+	instance_weights_test = np.array( instance_weights_test_list )  #instance_weights should be of type array in order to be used by sklearn module
+    else:
+   	instance_weights_test=None
+
+    
     #import pdb;pdb.set_trace()
     """
     data_raw = np.genfromtxt('natural_scene.data',delimiter = ",")
@@ -127,11 +139,11 @@ def client_target(task, callback):
         classifier1.fit(train.bags, train.bag_labels)
     else:
         #import pdb;pdb.set_trace()
-	classifier0.fit(train.instances, train.instance_labels[:,0].reshape((-1,)))
-	classifier1.fit(train.instances, train.instance_labels[:,1].reshape((-1,)))
-	classifier2.fit(train.instances, train.instance_labels[:,2].reshape((-1,)))
-	classifier3.fit(train.instances, train.instance_labels[:,3].reshape((-1,)))
-	classifier4.fit(train.instances, train.instance_labels[:,4].reshape((-1,)))
+	classifier0.fit(train.instances, train.instance_labels[:,0].reshape((-1,)), instance_weights)
+	classifier1.fit(train.instances, train.instance_labels[:,1].reshape((-1,)), instance_weights)
+	classifier2.fit(train.instances, train.instance_labels[:,2].reshape((-1,)), instance_weights)
+	classifier3.fit(train.instances, train.instance_labels[:,3].reshape((-1,)), instance_weights)
+	classifier4.fit(train.instances, train.instance_labels[:,4].reshape((-1,)), instance_weights)
     timer.stop('training')
 
     print 'Computing test bag predictions...'
@@ -152,7 +164,14 @@ def client_target(task, callback):
 
     print 'Computing train bag predictions...'
     timer.start('train_bag_predict')
-    train_bag_labels = classifier0.predict() # Saves results from training set
+    #train_bag_labels = classifier0.predict() # Saves results from training set
+
+    train_bag_labels0 = classifier0.predict()
+    train_bag_labels1 = classifier1.predict()
+    train_bag_labels2 = classifier2.predict()
+    train_bag_labels3 = classifier3.predict()
+    train_bag_labels4 = classifier4.predict()
+
     timer.stop('train_bag_predict')
 
     if INSTANCE_PREDICTIONS:
@@ -171,8 +190,11 @@ def client_target(task, callback):
     bag_predictions = np.hstack((bag_predictions0[:,np.newaxis], bag_predictions1[:,np.newaxis],bag_predictions2[:,np.newaxis],bag_predictions3[:,np.newaxis],bag_predictions4[:,np.newaxis]  ))
     for ( _,i), y in zip(test.instance_ids, map(tuple,bag_predictions)):
         submission['bag_predictions']['test'][i] = map(float,y)
-    for (_, i), y in zip(train.instance_ids, train_bag_labels.flat):
-        submission['bag_predictions']['train'][i] = float(y)
+
+
+    train_bag_labels = np.hstack((train_bag_labels0[:,np.newaxis], train_bag_labels1[:,np.newaxis],train_bag_labels2[:,np.newaxis],train_bag_labels3[:,np.newaxis],train_bag_labels4[:,np.newaxis]  ))
+    for (_, i), y in zip(train.instance_ids, map(tuple,train_bag_labels)):
+        submission['bag_predictions']['train'][i] = map(float,y)
     if INSTANCE_PREDICTIONS:
         for i, y in zip(test.instance_ids, instance_predictions.flat):
             submission['instance_predictions']['test'][i] =float(y)
@@ -202,7 +224,7 @@ def client_target(task, callback):
         if test.bag_labels.size > 1:
             AUC_list=[]
 	    for ii in range(5):
-		AUC_list.append(score(test.instance_labels[:,ii], bag_predictions[:,ii]))
+		AUC_list.append(score(test.instance_labels[:,ii], bag_predictions[:,ii], sample_weight = instance_weights_test)) #weighted AUC 
 	    AUC_mean=np.mean(AUC_list)
 	    submission['statistics'][scorename]=AUC_mean
 	    print ('Test Bag Average %s Score: %f'

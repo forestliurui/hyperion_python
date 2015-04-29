@@ -40,7 +40,7 @@ parameters:
     gamma: ['e-6', 'e1']
     search:
         type: random
-        n: 10
+        n: 2
 
 experiments:
     - dataset: natural_scene
