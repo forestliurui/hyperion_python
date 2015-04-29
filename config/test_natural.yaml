@@ -26,8 +26,8 @@ parameter_key_format:
 
 # The default [inner, outer] folds to use
 # (can also be specified per experiment)
-#folds: [10, 5]
-folds: [2, 2]
+folds: [10, 5]
+#folds: [2, 2]
 
 # A list of parameter settings
 # (can also be specified per experiment)
@@ -40,7 +40,7 @@ parameters:
     gamma: ['e-6', 'e1']
     search:
         type: random
-        n: 2
+        n: 10
 
 experiments:
     - dataset: natural_scene

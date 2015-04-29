@@ -4,10 +4,14 @@ import scipy.stats as ss
 from sklearn.metrics import hamming_loss
 
 class EvaluationMetric(object):
-	def __init__(self, task):
+	def __init__(self, task, prediction_matrix_test_accumulated):
+		test=data.get_dataset(task.test)
+		'''
 		prediction_inst=task.get_predictions('bag','test') #this is dictionary, with key as inst_id and value as list of scores for each label
-        	test=data.get_dataset(task.test)
-                self.prediction_matrix=reduce( lambda x, y :np.vstack((x, y)), [prediction_inst[x[1]]  for x in test.instance_ids   ]  )
+        	self.prediction_matrix=reduce( lambda x, y :np.vstack((x, y)), [prediction_inst[x[1]]  for x in test.instance_ids   ]  )
+		'''
+
+		self.prediction_matrix=prediction_matrix_test_accumulated
         	self.label_matrix=test.instance_labels 
 
 	def one_error(self):
@@ -28,7 +32,7 @@ class EvaluationMetric(object):
 		return np.mean([ hamming_loss(prediction_matrix_boolean[i,:], self.label_matrix[i,:] ) for i in  range(self.prediction_matrix.shape[0])  ] )
 	
 	def avg_prec(self):
-		import pdb;pdb.set_trace()
+		#import pdb;pdb.set_trace()
 		avgprec_list=[]
 		for i in range(self.prediction_matrix.shape[0]):
  			for j in range(self.prediction_matrix.shape[1]):
