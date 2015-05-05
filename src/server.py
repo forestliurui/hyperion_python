@@ -25,7 +25,7 @@ from folds import FoldConfiguration
 from progress import ProgressMonitor
 from results import get_result_manager
 
-PORT = 2113
+PORT = 2115
 DEFAULT_TASK_EXPIRE = 120 # Seconds
 TEMPLATE = """
 <html>
@@ -637,6 +637,8 @@ class ExperimentConfiguration(object):
 
 def start_experiment(configuration_file, results_root_dir):
     task_dict, param_dict = load_config(configuration_file, results_root_dir)
+    #import pdb;pdb.set_trace()
+    task_dict.values()[0].results_manager.store_parameters( param_dict.values()[0].param_dict)
     shared_variables={}  
     queue_tasks_to_be_run=Queue.Queue()
     #queue_tasks_finished=Queue.Queue() 
@@ -667,7 +669,7 @@ def server_experiment(task_dict, shared_variables, server):
 
     	train_dataset_to_be_tuned=data.get_dataset(train_dataset_name_to_be_tuned)
     	#import pdb; pdb.set_trace()
-    	iteration_max=25
+    	iteration_max=1
     	epsilon={}
     	alpha={}
     
