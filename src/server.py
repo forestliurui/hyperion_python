@@ -661,45 +661,65 @@ def start_experiment(configuration_file, results_root_dir):
     
 
 def server_experiment(task_dict, shared_variables, server):
-    for set_index_boosting in range(10):
-    	train_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0010.train' % set_index_boosting
-    	test_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0010.test' % set_index_boosting
+    for set_index_boosting in range(2):
+    	train_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0002.train' % set_index_boosting
+    	test_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0002.test' % set_index_boosting
 
     	train_dataset_to_be_tuned=data.get_dataset(train_dataset_name_to_be_tuned)
     	#import pdb; pdb.set_trace()
-    	iteration_max=25
+    	iteration_max=5
     	epsilon={}
     	alpha={}
-    
+        instance_weight={}
         
     	shared_variables['instance_weights']=dict.fromkeys(train_dataset_to_be_tuned.instance_ids,1)
-    
+    	for label_index in range(5):
+		instance_weight[label_index]=shared_variables['instance_weights']
+	
     	#shared_variables['instance_weights']=[1,1,1,1]
-    
+	prediction_matrix_test4label={}
+    	label_matrix_test4label={}
+	prediction_matrix_test_accumulated4label={}
     	for iteration in range(1, iteration_max+1):
         	print 'Boosting iteration NO. %d' % iteration
-    		task1=run_tune_parameter(train_dataset_name_to_be_tuned,test_dataset_name_to_be_tuned, task_dict , shared_variables, server)
+		for label_index in range(5):
+			shared_variables['instance_weights']=instance_weight[label_index]
+    			task1=run_tune_parameter(train_dataset_name_to_be_tuned,test_dataset_name_to_be_tuned, task_dict , shared_variables, server, label_index)
 
-    		prediction_matrix, label_matrix =task_dict[task1].get_prediction_true_matrix('bag', 'train')
-    		prediction_matrix_bool=(prediction_matrix > 0)
-    	
-    		error_per_instance=[ editdistance.eval(prediction_matrix_bool[i,:], label_matrix[i,:])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
-    		weight_per_instance=[ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
-    		epsilon[iteration]=np.average( error_per_instance, weights= weight_per_instance   )
-        	alpha[iteration]=log(( 1-epsilon[iteration])/float(epsilon[iteration]))
-        	#import pdb; pdb.set_trace()
+    			prediction_matrix, label_matrix =task_dict[task1].get_prediction_true_matrix('bag', 'train')
+    			prediction_matrix_bool=(prediction_matrix > 0)
+    			
 
-        	prediction_matrix_test, label_matrix_test =task_dict[task1].get_prediction_true_matrix('bag', 'test')
-        	if iteration == 1:
-        		prediction_matrix_test_accumulated=prediction_matrix_test*alpha[iteration]
-		else:
- 			prediction_matrix_test_accumulated=prediction_matrix_test_accumulated+prediction_matrix_test*alpha[iteration]
-        	#update weights
-        	for error_per_instance_index in range(len(error_per_instance)):
-                	weight_key=train_dataset_to_be_tuned.instance_ids[error_per_instance_index]
-			shared_variables['instance_weights'][weight_key]=shared_variables['instance_weights'][weight_key]*exp(alpha[iteration]*error_per_instance[error_per_instance_index])
-        	#import pdb; pdb.set_trace()
-		task_dict[task1].store_boosting_results(prediction_matrix_test_accumulated, iteration) #store the accumulated predictions and some evaluation metrics for boosting until current iteration
+			prediction_matrix_test4label[label_index], label_matrix_test4label[label_index] =task_dict[task1].get_prediction_true_matrix('bag', 'test')
+
+			
+    			#error_per_instance=[ editdistance.eval(prediction_matrix_bool[i,:], label_matrix[i,:])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
+			error_per_instance_bool=[ prediction_matrix_bool[i,label_index] != label_matrix[i,label_index]  for i in range(prediction_matrix.shape[0])  ]
+			error_per_instance=map(lambda x: 1 if x else 0, error_per_instance_bool)
+
+    			weight_per_instance=[ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
+    			epsilon[iteration]=np.average( error_per_instance, weights= weight_per_instance   )
+        		alpha[iteration]=log(( 1-epsilon[iteration])/float(epsilon[iteration]))
+        		#import pdb; pdb.set_trace()
+			
+
+			if iteration == 1:
+        			prediction_matrix_test_accumulated4label[label_index]=prediction_matrix_test4label[label_index]*alpha[iteration]
+			else:
+ 				prediction_matrix_test_accumulated4label[label_index]=prediction_matrix_test_accumulated4label[label_index]+prediction_matrix_test4label[label_index]*alpha[iteration]
+
+        		
+        		#update weights
+			instance_weight[label_index]={}
+        		for error_per_instance_index in range(len(error_per_instance)):
+                		weight_key=train_dataset_to_be_tuned.instance_ids[error_per_instance_index]
+				instance_weight[label_index][weight_key]=shared_variables['instance_weights'][weight_key]*exp(alpha[iteration]*error_per_instance[error_per_instance_index])
+        		#import pdb; pdb.set_trace()
+
+
+		
+		prediction_matrix_test_accumulated= np.vstack((prediction_matrix_test_accumulated4label[iii][:,iii] for iii in range(5))).transpose()
+        	task_dict[task1].store_boosting_results(prediction_matrix_test_accumulated, iteration) #store the accumulated predictions and some evaluation metrics for boosting until current iteration
 
 
     
@@ -726,11 +746,12 @@ def server_experiment(task_dict, shared_variables, server):
     '''
     import pdb; pdb.set_trace()
 
-def run_tune_parameter(train, test , tasks, shared_variables, server):
+def run_tune_parameter(train, test , tasks, shared_variables, server, label_index=None):
     #train is the string for training dataset
     #test is the string for testing dataset
     #tasks is the all possible tasks in dictionary format, i.e. task_dict
     #shared_variables contains two conponents: one is the queue to be run, the second one is condition_lock that synchronize
+    #label_index is the index of label with respect to which the optimal parameter combination is determined    
 
     #this function will return the optimal task on the training set/testing set pair
     
@@ -755,9 +776,14 @@ def run_tune_parameter(train, test , tasks, shared_variables, server):
     
     num_para_combination=max([ subtasks.keys()[x][5] for x in range(len(subtasks) )  ])+1
     statistic_avg_per_para={}
+    
+    if label_index is None:
+    	statisitic_name='AUC'
+    else:
+	statisitic_name='AUC'+str(label_index)
 
     for para_index in range(num_para_combination):
- 	statistic_avg_per_para[para_index]=np.mean( [tasks[x].get_statistic('AUC')[0] for x in subtasks.keys() if x[5]==para_index] ) 
+ 	statistic_avg_per_para[para_index]=np.mean( [tasks[x].get_statistic(statisitic_name)[0] for x in subtasks.keys() if x[5]==para_index] ) 
     
     para_index_optimal = np.argmax(statistic_avg_per_para.values())
     subtasks=dict((k, tasks[k] ) for k in tasks.keys()  if k[2]== train and k[5] == para_index_optimal    )

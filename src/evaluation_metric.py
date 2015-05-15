@@ -15,7 +15,7 @@ class EvaluationMetric(object):
         	self.label_matrix=test.instance_labels 
 
 	def one_error(self):
-		return np.mean([ self.label_matrix[i, np.argmax(self.prediction_matrix[i,:])]  for i in range(self.prediction_matrix.shape[0]) ])
+		return 1-np.mean([ self.label_matrix[i, np.argmax(self.prediction_matrix[i,:])]  for i in range(self.prediction_matrix.shape[0]) ])
 
 	def coverage(self):
         	#compute coverage      
