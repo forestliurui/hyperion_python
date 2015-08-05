@@ -1,4 +1,4 @@
 *.view
-results*
+results*/
 *.data
 *.names
