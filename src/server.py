@@ -142,12 +142,13 @@ class ExperimentServer(object):
                 raise HTTPError(404)
             key, task = candidates.pop(0)
             task.ping()
-
+  	
+	#import pdb;pdb.set_trace()
         (experiment_name, experiment_id,
          train, test, parameter_id, parameter_set) = key
         parameters = self.params[experiment_id].get_parameters(
             parameter_id=parameter_id, parameter_set=parameter_set)
-        arguments = {'key': key, 'parameters': parameters, 'instance_weights':self.shared_variables['instance_weights']}
+        arguments = {'key': key, 'parameters': parameters, 'instance_weights':self.shared_variables['instance_weights'], 'C_derivative':self.shared_variables['C_derivative']}
         return yaml.dump(arguments, Dumper=Dumper)
 
     @plaintext
@@ -646,6 +647,7 @@ def start_experiment(configuration_file, results_root_dir):
     #queues['finished']=queue_tasks_finished
     shared_variables['condition_lock']=threading.Condition() #condition variable used to synchronize server and controller
     shared_variables['instance_weights']=[]
+    shared_variables['C_derivative']=[]
 
     server = ExperimentServer(task_dict, param_dict, render, shared_variables)
     cherrypy.config.update({'server.socket_port': PORT,
@@ -671,7 +673,7 @@ def server_experiment(task_dict, shared_variables, server):
     	epsilon={}
     	alpha={}
     
-        
+        shared_variables['C_derivative']=dict.fromkeys(train_dataset_to_be_tuned.bag_ids,-1)
     	shared_variables['instance_weights']=dict.fromkeys(train_dataset_to_be_tuned.instance_ids,1)
     
     	#shared_variables['instance_weights']=[1,1,1,1]
@@ -682,7 +684,12 @@ def server_experiment(task_dict, shared_variables, server):
 
     		prediction_matrix, label_matrix =task_dict[task1].get_prediction_true_matrix('bag', 'train')
     		prediction_matrix_bool=(prediction_matrix > 0)
-    	
+    	        label_matrix_pos_neg1 = 2*label_matrix-1
+
+		#shared_variables['C_derivative'] = -np.exp(label_matrix_pos_neg1*prediction_matrix)
+
+
+
     		error_per_instance=[ editdistance.eval(prediction_matrix_bool[i,:], label_matrix[i,:])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
     		weight_per_instance=[ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
     		epsilon[iteration]=np.average( error_per_instance, weights= weight_per_instance   )
@@ -692,12 +699,24 @@ def server_experiment(task_dict, shared_variables, server):
         	prediction_matrix_test, label_matrix_test =task_dict[task1].get_prediction_true_matrix('bag', 'test')
         	if iteration == 1:
         		prediction_matrix_test_accumulated=prediction_matrix_test*alpha[iteration]
+			prediction_matrix_train_accumulated=prediction_matrix_train*alpha[iteration]
 		else:
  			prediction_matrix_test_accumulated=prediction_matrix_test_accumulated+prediction_matrix_test*alpha[iteration]
+			prediction_matrix_train_accumulated = prediction_matrix_train_accumulated+prediction_matrix_train*alpha[iteration]
+		
+		#shared_variables['C_derivative'] = -np.exp(label_matrix_pos_neg1*prediction_matrix_train_accumulated/sum(alpha.values()))
+
+		for bag_index4update in range(len(train_dataset_to_be_tuned.bag_ids)):
+                	C_key=train_dataset_to_be_tuned.bag_ids[bag_index4update]
+			shared_variables['C_derivative'][C_key]=-np.exp(label_matrix_pos_neg1[bag_index4update]*prediction_matrix_train_accumulated[bag_index4update]/sum(alpha.values()))
+
+
+		'''
         	#update weights
         	for error_per_instance_index in range(len(error_per_instance)):
                 	weight_key=train_dataset_to_be_tuned.instance_ids[error_per_instance_index]
 			shared_variables['instance_weights'][weight_key]=shared_variables['instance_weights'][weight_key]*exp(alpha[iteration]*error_per_instance[error_per_instance_index])
+		'''
         	#import pdb; pdb.set_trace()
 		task_dict[task1].store_boosting_results(prediction_matrix_test_accumulated, iteration) #store the accumulated predictions and some evaluation metrics for boosting until current iteration
 

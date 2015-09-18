@@ -57,7 +57,7 @@ class IterativeQP(object):
     def solve(self, verbose=False):
         # Optimize
         old_settings = _apply_options({'show_progress': verbose})
-
+        #import pdb;pdb.set_trace()
         for i in count(-9):
             try:
                 results = qp(self.P, self.q, self.G,
@@ -133,8 +133,12 @@ def _convert(H, f, Aeq, beq, lb, ub):
         b = cvxmat(beq)
 
     n = lb.size
-    G = sparse([-speye(n), speye(n)])
-    h = cvxmat(vstack([-lb, ub]))
+    if ub == None:
+    	G = -speye(n)
+	h = cvxmat(-lb)
+    else:
+    	G = sparse([-speye(n), speye(n)])
+    	h = cvxmat(vstack([-lb, ub]))
     return P, q, G, h, A, b
 
 
