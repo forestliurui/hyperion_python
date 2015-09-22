@@ -2,3 +2,5 @@
 results*/
 *.data
 *.names
+*.csv
+*.txt

@@ -510,7 +510,7 @@ class Task(object):
 			data_test_train=data.get_dataset(self.test)
 
                 #test.instance_ids
-        	prediction_matrix=reduce( lambda x, y :np.vstack((x, y)), [prediction_inst[x[1]]  for x in data_test_train.instance_ids   ]  )
+        	prediction_matrix=reduce( lambda x, y :np.vstack((x, y)), [prediction_inst[x[0]]  for x in data_test_train.instance_ids   ]  )
         	label_matrix=data_test_train.instance_labels
 	elif bag_or_inst.startswith('i'):
 		raise ValueError('get_prediction_true_matrix for instance not implemented')
@@ -539,18 +539,18 @@ class Task(object):
         #bag_predictions = np.hstack((bag_predictions0[:,np.newaxis], bag_predictions1[:,np.newaxis],bag_predictions2[:,np.newaxis],bag_predictions3[:,np.newaxis],bag_predictions4[:,np.newaxis]  ))
         data_test=data.get_dataset(self.test)
 	submission_boosting={}
-        submission_boosting['instance_predictions']={}
-        submission_boosting['instance_predictions']['test']={}
-        for i, y in zip(data_test.instance_ids, map(tuple,prediction_matrix_test_accumulated)):
-        	submission_boosting['instance_predictions']['test'][i] = map(float,y)
+        submission_boosting['bag_predictions']={}
+        submission_boosting['bag_predictions']['test']={}
+        for i, y in zip(data_test.bag_ids, map(tuple,prediction_matrix_test_accumulated)):
+        	submission_boosting['bag_predictions']['test'][i] = map(float,y)
         
 	eval_task=evaluation_metric.EvaluationMetric(self, prediction_matrix_test_accumulated)
     	eval_task.avg_prec()
 	submission_boosting['statistics_boosting']={}
 	submission_boosting['statistics_boosting']['hamm_loss']=eval_task.hamm_loss()
-	submission_boosting['statistics_boosting']['one_error']=eval_task.one_error()
-	submission_boosting['statistics_boosting']['coverage']=eval_task.coverage()
-	submission_boosting['statistics_boosting']['average_precision']=eval_task.avg_prec()
+	#submission_boosting['statistics_boosting']['one_error']=eval_task.one_error()
+	#submission_boosting['statistics_boosting']['coverage']=eval_task.coverage()
+	#submission_boosting['statistics_boosting']['average_precision']=eval_task.avg_prec()
 	
 	try:
             from sklearn.metrics import roc_auc_score as score
@@ -559,7 +559,7 @@ class Task(object):
         scorename = 'AUC'
 
 	AUC_list=[]
-	for ii in range(5):
+	for ii in range(1):
 	    AUC_list.append(score(data_test.instance_labels[:,ii], prediction_matrix_test_accumulated[:,ii])) 
 	    AUC_mean=np.mean(AUC_list)
 	    submission_boosting['statistics_boosting'][scorename]=AUC_mean
@@ -664,8 +664,11 @@ def start_experiment(configuration_file, results_root_dir):
 
 def server_experiment(task_dict, shared_variables, server):
     for set_index_boosting in range(10):
-    	train_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0010.train' % set_index_boosting
-    	test_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0010.test' % set_index_boosting
+    	#train_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0002.train' % set_index_boosting
+    	#test_dataset_name_to_be_tuned='natural_scene.fold_000%d_of_0002.test' % set_index_boosting
+
+	train_dataset_name_to_be_tuned='MIL_Boost_syn.fold_000%d_of_0002.train' % set_index_boosting
+    	test_dataset_name_to_be_tuned='MIL_Boost_syn.fold_000%d_of_0002.test' % set_index_boosting
 
     	train_dataset_to_be_tuned=data.get_dataset(train_dataset_name_to_be_tuned)
     	#import pdb; pdb.set_trace()
@@ -690,13 +693,14 @@ def server_experiment(task_dict, shared_variables, server):
 
 
 
-    		error_per_instance=[ editdistance.eval(prediction_matrix_bool[i,:], label_matrix[i,:])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
-    		weight_per_instance=[ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
-    		epsilon[iteration]=np.average( error_per_instance, weights= weight_per_instance   )
-        	alpha[iteration]=log(( 1-epsilon[iteration])/float(epsilon[iteration]))
+    		error_per_bag = [ editdistance.eval([x for x in prediction_matrix_bool[i,:]], [label_matrix[i,0]])/float(prediction_matrix.shape[1])  for i in range(prediction_matrix.shape[0])  ]
+    		#weight_per_bag = [ shared_variables['instance_weights'][  train_dataset_to_be_tuned.instance_ids[i] ]     for i in range(prediction_matrix.shape[0]) ] 
+    		#epsilon[iteration] = np.average( error_per_bag, weights = weight_per_bag   )
+		epsilon[iteration] = np.average( error_per_bag   )
+        	alpha[iteration] = log(( 1-epsilon[iteration])/float(epsilon[iteration]))
         	#import pdb; pdb.set_trace()
-
-        	prediction_matrix_test, label_matrix_test =task_dict[task1].get_prediction_true_matrix('bag', 'test')
+		prediction_matrix_train = prediction_matrix  #prob prediction for each bag in trianing set
+        	prediction_matrix_test, label_matrix_test =task_dict[task1].get_prediction_true_matrix('bag', 'test') #prob prediction for each bag in test set
         	if iteration == 1:
         		prediction_matrix_test_accumulated=prediction_matrix_test*alpha[iteration]
 			prediction_matrix_train_accumulated=prediction_matrix_train*alpha[iteration]
@@ -709,6 +713,7 @@ def server_experiment(task_dict, shared_variables, server):
 		for bag_index4update in range(len(train_dataset_to_be_tuned.bag_ids)):
                 	C_key=train_dataset_to_be_tuned.bag_ids[bag_index4update]
 			shared_variables['C_derivative'][C_key]=-np.exp(label_matrix_pos_neg1[bag_index4update]*prediction_matrix_train_accumulated[bag_index4update]/sum(alpha.values()))
+		label_matrix_test_pos_neg1 = 2*label_matrix_test-1
 
 
 		'''
@@ -718,7 +723,11 @@ def server_experiment(task_dict, shared_variables, server):
 			shared_variables['instance_weights'][weight_key]=shared_variables['instance_weights'][weight_key]*exp(alpha[iteration]*error_per_instance[error_per_instance_index])
 		'''
         	#import pdb; pdb.set_trace()
+		exp_cost_train=np.average( np.exp( np.multiply(np.matrix(prediction_matrix_train_accumulated).reshape(-1, 1), np.matrix(label_matrix_pos_neg1[:, 0]).reshape(-1,1) ) ) )
+		exp_cost_test=np.average( np.exp( np.multiply(np.matrix(prediction_matrix_test_accumulated).reshape(-1, 1), np.matrix(label_matrix_test_pos_neg1[:, 0]).reshape(-1,1)) ) )
+		print('For iteration %d, exp cost for training data is %f and for test data is %f' % (iteration, exp_cost_train, exp_cost_test))
 		task_dict[task1].store_boosting_results(prediction_matrix_test_accumulated, iteration) #store the accumulated predictions and some evaluation metrics for boosting until current iteration
+		#import pdb; pdb.set_trace()
 
 
     

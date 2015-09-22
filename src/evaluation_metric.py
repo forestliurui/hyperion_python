@@ -29,7 +29,9 @@ class EvaluationMetric(object):
 	
 	def hamm_loss(self):
 		prediction_matrix_boolean=(self.prediction_matrix>0)
-		return np.mean([ hamming_loss(prediction_matrix_boolean[i,:], self.label_matrix[i,:] ) for i in  range(self.prediction_matrix.shape[0])  ] )
+		#return np.mean([ hamming_loss(prediction_matrix_boolean[i,:], self.label_matrix[i,:] ) for i in  range(self.prediction_matrix.shape[0])  ] ) #used for multi-label scenario
+		return np.mean([ hamming_loss([x for x in prediction_matrix_boolean[i,:]],[ self.label_matrix[i,0]] ) for i in  range(self.prediction_matrix.shape[0])  ] )  #used for single-label scenario
+
 	
 	def avg_prec(self):
 		#import pdb;pdb.set_trace()

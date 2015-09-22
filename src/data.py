@@ -45,10 +45,10 @@ class MIDataset(object):
 
     def __init__(self, ids, X, y, regression):
         self.regression = regression
-        self.instance_ids = ids  #this is a tuple list, i.e. each element in instance_ids is (bag_id, instance_id)
-        self.instances = X
+        #self.instance_ids_temp = ids  #this is a tuple list, i.e. each element in instance_ids is (bag_id, instance_id)
+        #self.instances_temp = X
         self.instances_as_bags = [xx.reshape((1, -1)) for xx in X]
-        self.instance_labels = y
+        #self.instance_labels_temp = y
         if not regression:
             self.pm1_instance_labels = (2.0*y - 1)
         self.instance_dict = dict()
@@ -75,13 +75,25 @@ class MIDataset(object):
                 else:
                     bag_label_dict[bid] = yi
             else:
-                bag_label_dict[bid] |= yi
+                bag_label_dict[bid] |= yi  # "|=" means element-wise "or" between one-dimensional array "bag_label_dict[bid]" and one-dimensional array "yi" and 
             bag_inst_label_dict[bid].append(yi)
-
+	
+	self.bag_id_dict = bag_id_dict # self.bag_id_dict[bid] is a list of the iid contained in the bag bid
         self.bag_ids = sorted(bag_dict.keys())
         self.bags = [np.vstack(bag_dict[bid]) for bid in self.bag_ids]
         self.bag_labels = np.vstack([bag_label_dict[bid]
                                     for bid in self.bag_ids])
+	self.instances = np.vstack(self.bags)
+	self.instance_ids=[]
+	self.instance_labels=[]
+	
+	for bid in self.bag_ids:
+		for iid in bag_id_dict[bid]:
+			self.instance_ids.append(  (bid, iid)  )
+		#import pdb;pdb.set_trace()
+		self.instance_labels.append( bag_inst_label_dict[bid]  )
+	self.instance_labels=np.vstack(self.instance_labels)
+
         if not regression:
             self.pm1_bag_labels = (2.0*self.bag_labels - 1)
         self.bag_dict = dict()

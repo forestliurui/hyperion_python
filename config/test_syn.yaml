@@ -37,10 +37,10 @@ parameters:
     base_kernel: rbf
     normalization: none
     C: ['e-3', 'e3']
-    gamma: ['e-6', 'e1']
+    gamma: ['e-1', 'e1']
     search:
         type: random
         n: 1
 
 experiments:
-    - dataset: natural_scene
+    - dataset: MIL_Boost_syn

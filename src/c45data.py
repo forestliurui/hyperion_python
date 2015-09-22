@@ -448,6 +448,7 @@ def _parse_examples(schema, data_filename):
 def _parse_example(schema, line):
     """Parse a single example from the line of a data file"""
     values = _parse_values(line)
+    #import pdb; pdb.set_trace()
     if len(values) != len(schema):
         raise Exception('Feature-data size mismatch: %s' % line)
 

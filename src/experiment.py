@@ -9,6 +9,8 @@ from data import get_dataset
 from mi_svm import MIKernelSVM, MIKernelSVR, SVM
 from vocabulary import EmbeddedSpaceSVM
 from quadprog import quadprog
+from mil_coordescent_boost_base_classifier import MIL_Base
+from sklearn.metrics import hamming_loss
 
 INSTANCE_PREDICTIONS = True
 
@@ -16,6 +18,7 @@ CLASSIFIERS = {
     'svm': SVM,
     'svr': MIKernelSVR,
     'embedded_svm' : EmbeddedSpaceSVM,
+    'mil_base': MIL_Base,
 }
 
 IDX_DIR = os.path.join('box_counting', 'converted_datasets')
@@ -81,24 +84,11 @@ def client_target(task, callback):
 	instance_weights_test = np.array( instance_weights_test_list )  #instance_weights should be of type array in order to be used by sklearn module
     else:
    	instance_weights_test=None
-
+	
+    	
     
     #import pdb;pdb.set_trace()
-    """
-    data_raw = np.genfromtxt('natural_scene.data',delimiter = ",")
-    class data_class(object):
-	def __init__(self):
-		pass
-    train=data_class()
-    test=data_class()
-    feature_matrix = data_raw[:, 2:-5]
-    label_matrix = data_raw[:, -5:]
-    num_instances = data_raw.shape[0]
-    train.instances = feature_matrix[:int(math.floor(num_instances/2)),: ]
-    test.instances = feature_matrix[int(math.floor(num_instances/2)):,: ]
-    train.instance_labels = label_matrix[:int(math.floor(num_instances/2)),: ]
-    test.instance_labels = label_matrix[int(math.floor(num_instances/2)):,:  ]
-    """
+ 
     submission = {
         'instance_predictions' : {
             'train' : {},
@@ -126,7 +116,7 @@ def client_target(task, callback):
         parameters['empirical_labels'] = empirical_labels
         train.bags = train.bag_ids
         test.bags = test.bag_ids
-
+    #import pdb;pdb.set_trace()
     classifier_name = parameters.pop('classifier')
     if classifier_name in CLASSIFIERS:
         classifier0 = CLASSIFIERS[classifier_name](**parameters)
@@ -138,38 +128,24 @@ def client_target(task, callback):
         print 'Technique "%s" not supported' % classifier_name
         callback.quit = True
         return
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
     
     num_inst_train = len(train.instance_ids)
     num_bag_train = len(set([x[0] for x in train.instance_ids]))
-    #import pdb;pdb.set_trace()
     num_inst_per_bag = num_inst_train/num_bag_train
-    H = np.zeros((num_inst_train+2*num_bag_train, num_inst_train+2*num_bag_train))
-    gram_matrix = classifier0.kernel(train.instances, train.instances)
-    H[0:num_inst_train, 0:num_inst_train] = gram_matrix
-    H=2*H
-    f = np.vstack((np.zeros((num_inst_train,1)), np.ones((2*num_bag_train,1))))
-    Aeq1 = np.zeros((num_bag_train, num_inst_train))
-    for bag_index in range(num_bag_train):
-	Aeq1[bag_index, bag_index*num_inst_per_bag: (bag_index+1)*num_inst_per_bag] = np.ones(num_inst_per_bag)
-    Aeq2 = np.hstack((-np.eye(num_bag_train), np.eye(num_bag_train)))
-    Aeq = np.hstack((Aeq1, Aeq2))
-    train_bag_labels = train.instance_labels[0: num_inst_train: num_inst_per_bag,0]
+    train_bag_labels = train.bag_labels[:, 0]
     train_bag_labels=np.asmatrix(train_bag_labels).reshape((-1,1))
-    #C_derivative=-np.ones((num_bag_train,1))
+
     train_bag_labels_pos_neg1=2*train_bag_labels-1
-    beq = np.multiply(train_bag_labels_pos_neg1, C_derivative)
-    lb = np.zeros((num_inst_train+2*num_bag_train,1))
-    #ub=100000000*np.ones((num_inst_train+2*num_bag_train,1))
-    ub = None
+    #import pdb;pdb.set_trace()
+    
+
 
     print 'Training...'
     timer.start('training')
-    import pdb;pdb.set_trace()
-    #solution_QP=quadprog(H, f, Aeq, beq, lb, ub, verbose=True)
-    solution_QP={}
-    solution_QP[0]=np.asmatrix(np.ones((num_inst_train+2*num_bag_train, 1)))
-   
+    #import pdb;pdb.set_trace()
+    
+    classifier0.fit(train.instances, train_bag_labels_pos_neg1, train.instance_ids, C_derivative)
 
 
     timer.stop('training')
@@ -177,18 +153,11 @@ def client_target(task, callback):
 
     print 'Computing test bag predictions...'
     timer.start('test_bag_predict')
-    
-    #predictions sections
-    alpha = solution_QP[0][0:num_inst_train]
-    gram_matrix_test = classifier0.kernel(test.instances, train.instances)
-    
-    num_inst_test = len(test.instance_ids)
-    num_bag_test = len(set([x[0] for x in test.instance_ids]))
      
-    instance_predictions0 = -gram_matrix_test*alpha
-    bag_predictions0 = np.amax(instance_predictions0.reshape((-1, num_inst_per_bag)), axis = 1)
-    test_bag_labels = test.instance_labels[0: num_inst_test: num_inst_per_bag,0]
-    test_bag_labels=np.asmatrix(test_bag_labels).reshape((-1,1))
+    instance_predictions0 = classifier0.predict_instance(test.instances)
+    bag_predictions0 = classifier0.predict_bag(test.instances, test.instance_ids)
+
+    test_bag_labels = bag_predictions0
 
     timer.stop('test_bag_predict')
 
@@ -202,9 +171,9 @@ def client_target(task, callback):
 
     print 'Computing train bag predictions...'
     timer.start('train_bag_predict')
-    train_instance_predictions0 = -gram_matrix*alpha
-    train_bag_predictions0 = np.amax(train_instance_predictions0.reshape((-1, num_inst_per_bag)), axis = 1)
-
+    train_instance_predictions0 = classifier0.predict_instance(train.instances)
+    train_bag_predictions0 = classifier0.predict_bag(train.instances, train.instance_ids)
+    train_bag_labels = train_bag_predictions0
     
     timer.stop('train_bag_predict')
 
@@ -222,20 +191,20 @@ def client_target(task, callback):
             submission['statistics'][attribute] = getattr(classifier,
                                                           attribute)
     submission['statistics'].update(timer.get_all('_time'))
-
+    #import pdb;pdb.set_trace()
     bag_predictions=bag_predictions0
-    for ( _,i), y in zip(test.instance_ids, map(tuple,bag_predictions)):
+    for i, y in zip(test.bag_ids, map(tuple, bag_predictions)):
         submission['bag_predictions']['test'][i] = map(float,y)
 
 
     train_bag_labels = train_bag_predictions0
-    for (_, i), y in zip(train.instance_ids, map(tuple,train_bag_labels)):
+    for i, y in zip(train.bag_ids, map(tuple, train_bag_labels)):
         submission['bag_predictions']['train'][i] = map(float,y)
     if INSTANCE_PREDICTIONS:
-        for i, y in zip(test.instance_ids, instance_predictions.flat):
-            submission['instance_predictions']['test'][i] =float(y)
-        for i, y in zip(train.instance_ids, train_instance_labels.flat):
-            submission['instance_predictions']['train'][i] = float(y)
+        for (b, i), y in zip(test.instance_ids, instance_predictions.flat):
+            submission['instance_predictions']['test'][(b,i)] =float(y)
+        for (b, i), y in zip(train.instance_ids, train_instance_labels.flat):
+            submission['instance_predictions']['train'][(b, i)] = float(y)
 
     # For backwards compatibility with older versions of scikit-learn
     if train.regression:
@@ -260,12 +229,23 @@ def client_target(task, callback):
         if test.bag_labels.size > 1:
             AUC_list=[]
 	    for ii in range(1):
-		AUC_list.append(score(np.array(test_bag_labels[:,ii]), np.array(bag_predictions[:,ii]))) #weighted AUC 
+		AUC_list.append(score(np.array(test.bag_labels[:,ii]), np.array(test_bag_labels[:,ii]))) #weighted AUC 
 	    AUC_mean=np.mean(AUC_list)
 	    submission['statistics'][scorename]=AUC_mean
 	    print ('Test Bag Average %s Score: %f'
                    % (scorename,AUC_mean ))
 	    print( 'Test Bag Individual %s Score: ' %scorename   +','.join(map(str, AUC_list))   )
+
+            Accuracy_test = 1 - hamming_loss(test.bag_labels[:, 0], test_bag_labels>0)
+            print( 'Test Bag accuracy: %f' % Accuracy_test  )
+
+
+	    AUC_train=score(np.array(train.bag_labels[:,0]), np.array(train_bag_labels[:,0]) )
+	    Accuracy_train = 1- hamming_loss(train.bag_labels[:, 0], train_bag_labels>0)
+	    print ('Train Bag Average %s Score: %f'
+                   % ('AUC', AUC_train ))
+	    print( 'Train Bag accuracy: %f' % Accuracy_train  )
+	
         """
         if INSTANCE_PREDICTIONS and test.instance_labels.size > 1:
             print ('Test Inst. %s Score: %f'
@@ -274,6 +254,7 @@ def client_target(task, callback):
     except Exception as e:
         print "Couldn't compute scores."
         print e
+    import pdb;pdb.set_trace()
 
     print 'Finished task %s.' % str(experiment_id)
     return submission
